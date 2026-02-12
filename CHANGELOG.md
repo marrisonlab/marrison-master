@@ -7,6 +7,11 @@ e questo progetto aderisce a [Semantic Versioning](https://semver.org/spec/v2.0.
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-02-12
+### Aggiunto
+- Anteprima dei contenuti (plugin e temi) nella pagina delle impostazioni inserendo l'URL del repository
+- Pulsante per aggiornare manualmente la cache e i dati dei repository privati nella pagina impostazioni
+
 ## [1.0.2] - 2026-02-12
 ### Aggiunto
 - Pulsante "Cerca Aggiornamenti su GitHub" nel pannello admin per forzare il controllo versione

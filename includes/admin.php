@@ -10,6 +10,7 @@ class Marrison_Master_Admin {
         add_action('admin_init', [$this, 'register_settings']);
         add_action('wp_ajax_marrison_client_action', [$this, 'handle_ajax_action']);
         add_action('wp_ajax_marrison_master_clear_cache', [$this, 'handle_clear_cache']);
+        add_action('wp_ajax_marrison_fetch_repo_data', [$this, 'handle_fetch_repo_data']);
     }
 
     public function add_menu() {
@@ -46,15 +47,88 @@ class Marrison_Master_Admin {
                 <table class="form-table">
                     <tr valign="top">
                         <th scope="row">URL Repository Plugin Privato</th>
-                        <td><input type="url" name="marrison_private_plugins_repo" value="<?php echo esc_attr(get_option('marrison_private_plugins_repo')); ?>" class="regular-text" /></td>
+                        <td>
+                            <input type="url" name="marrison_private_plugins_repo" id="marrison_private_plugins_repo" value="<?php echo esc_attr(get_option('marrison_private_plugins_repo')); ?>" class="regular-text" />
+                            <div id="marrison_plugins_repo_preview" class="marrison-repo-preview" style="margin-top: 5px;"></div>
+                        </td>
                     </tr>
                     <tr valign="top">
                         <th scope="row">URL Repository Temi Privato</th>
-                        <td><input type="url" name="marrison_private_themes_repo" value="<?php echo esc_attr(get_option('marrison_private_themes_repo')); ?>" class="regular-text" /></td>
+                        <td>
+                            <input type="url" name="marrison_private_themes_repo" id="marrison_private_themes_repo" value="<?php echo esc_attr(get_option('marrison_private_themes_repo')); ?>" class="regular-text" />
+                            <div id="marrison_themes_repo_preview" class="marrison-repo-preview" style="margin-top: 5px;"></div>
+                        </td>
                     </tr>
                 </table>
+                <p>
+                    <button type="button" id="marrison_refresh_repo_btn" class="button button-secondary">Aggiorna Dati Repo</button>
+                    <span id="marrison_refresh_spinner" class="spinner" style="float:none;"></span>
+                </p>
                 <?php submit_button(); ?>
             </form>
+            
+            <script>
+            jQuery(document).ready(function($) {
+                // Auto-load on page load if values exist
+                loadRepoData();
+
+                $('#marrison_refresh_repo_btn').on('click', function() {
+                    loadRepoData();
+                });
+
+                function loadRepoData() {
+                    var pluginsUrl = $('#marrison_private_plugins_repo').val();
+                    var themesUrl = $('#marrison_private_themes_repo').val();
+                    
+                    if (!pluginsUrl && !themesUrl) return;
+
+                    var spinner = $('#marrison_refresh_spinner');
+                    spinner.addClass('is-active');
+                    
+                    var requests = [];
+
+                    if (pluginsUrl) {
+                        $('#marrison_plugins_repo_preview').html('<span style="opacity:0.5;">Caricamento...</span>');
+                        requests.push(fetchRepo(pluginsUrl, '#marrison_plugins_repo_preview'));
+                    } else {
+                         $('#marrison_plugins_repo_preview').empty();
+                    }
+
+                    if (themesUrl) {
+                        $('#marrison_themes_repo_preview').html('<span style="opacity:0.5;">Caricamento...</span>');
+                        requests.push(fetchRepo(themesUrl, '#marrison_themes_repo_preview'));
+                    } else {
+                        $('#marrison_themes_repo_preview').empty();
+                    }
+
+                    $.when.apply($, requests).always(function() {
+                        spinner.removeClass('is-active');
+                    });
+                }
+
+                function fetchRepo(url, targetId) {
+                    return $.ajax({
+                        url: ajaxurl,
+                        method: 'POST',
+                        data: {
+                            action: 'marrison_fetch_repo_data',
+                            nonce: '<?php echo wp_create_nonce('marrison_master_nonce'); ?>',
+                            repo_url: url
+                        },
+                        success: function(res) {
+                            if (res.success) {
+                                $(targetId).html(res.data.html);
+                            } else {
+                                $(targetId).html('<span style="color:#dc3232;">Errore: ' + res.data.message + '</span>');
+                            }
+                        },
+                        error: function() {
+                            $(targetId).html('<span style="color:#dc3232;">Errore di connessione</span>');
+                        }
+                    });
+                }
+            });
+            </script>
             
             <hr>
             
@@ -78,6 +152,80 @@ class Marrison_Master_Admin {
             
         </div>
         <?php
+    }
+
+    public function handle_fetch_repo_data() {
+        check_ajax_referer('marrison_master_nonce', 'nonce');
+        
+        $url = isset($_POST['repo_url']) ? esc_url_raw($_POST['repo_url']) : '';
+        
+        if (empty($url)) {
+            wp_send_json_error(['message' => 'URL non valido']);
+        }
+
+        $response = wp_remote_get($url, ['timeout' => 15, 'sslverify' => false]);
+        
+        if (is_wp_error($response)) {
+            wp_send_json_error(['message' => 'Errore HTTP: ' . $response->get_error_message()]);
+        }
+        
+        $code = wp_remote_retrieve_response_code($response);
+        if ($code !== 200) {
+            wp_send_json_error(['message' => 'Errore HTTP: ' . $code]);
+        }
+        
+        $body = wp_remote_retrieve_body($response);
+        $data = json_decode($body, true);
+        
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            // Fallback: try appending packages.json if the URL ends in / or just looks like a base URL
+            $url_fallback = untrailingslashit($url) . '/packages.json';
+            $response = wp_remote_get($url_fallback, ['timeout' => 15, 'sslverify' => false]);
+            if (!is_wp_error($response) && wp_remote_retrieve_response_code($response) === 200) {
+                 $body = wp_remote_retrieve_body($response);
+                 $data = json_decode($body, true);
+            }
+        }
+
+        if (json_last_error() !== JSON_ERROR_NONE) {
+             wp_send_json_error(['message' => 'Risposta non valida (non è JSON).']);
+        }
+        
+        $items = [];
+        if (is_array($data)) {
+            // Handle different structures
+            $list = $data;
+            if (isset($data['packages'])) $list = $data['packages'];
+            elseif (isset($data['plugins'])) $list = $data['plugins'];
+            elseif (isset($data['themes'])) $list = $data['themes'];
+            
+            foreach ($list as $key => $item) {
+                if (!is_array($item)) continue;
+                $name = $item['name'] ?? $item['title'] ?? '';
+                $version = $item['version'] ?? $item['new_version'] ?? '';
+                
+                // Sometimes keys are slug => { name, version }
+                if (empty($name) && is_string($key)) $name = ucfirst($key);
+                
+                if ($name && $version) {
+                    $items[] = ['name' => $name, 'version' => $version];
+                }
+            }
+        }
+        
+        if (empty($items)) {
+             wp_send_json_success(['html' => '<p style="opacity:0.7; margin:5px 0;">Nessun elemento trovato o formato non riconosciuto.</p>']);
+        }
+        
+        ob_start();
+        echo '<ul style="margin: 5px 0; max-height: 150px; overflow-y: auto; background: rgba(0,0,0,0.05); padding: 8px; border-radius: 4px; list-style:none;">';
+        foreach ($items as $item) {
+            echo '<li style="margin-bottom:4px; font-size:13px;"><strong>' . esc_html($item['name']) . '</strong> <span style="opacity:0.7; float:right;">v.' . esc_html($item['version']) . '</span></li>';
+        }
+        echo '</ul>';
+        $html = ob_get_clean();
+        
+        wp_send_json_success(['html' => $html]);
     }
 
     public function handle_clear_cache() {
