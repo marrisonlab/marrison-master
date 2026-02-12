@@ -58,65 +58,24 @@ class Marrison_Master_Admin {
             
             <hr>
             
-            <h2>Strumenti di Manutenzione</h2>
-            <p>Usa questi strumenti se gli aggiornamenti non vengono rilevati correttamente.</p>
+            <h2>Aggiornamenti Plugin</h2>
             <table class="form-table">
                 <tr>
-                    <th scope="row">Forza Refresh Repository</th>
+                    <th scope="row">Versione Marrison Master</th>
                     <td>
-                        <button id="marrison-force-refresh-repo" class="button button-secondary">
-                            Forza Refresh Repository su Tutti i Client
-                        </button>
+                        <p>Versione installata: <strong><?php echo get_plugin_data(MARRISON_MASTER_PATH . 'marrison-master.php')['Version']; ?></strong></p>
+                        <p>
+                            <a href="<?php echo wp_nonce_url(admin_url('plugins.php?force-check=1&plugin=marrison-master/marrison-master.php'), 'marrison-force-check-marrison-master/marrison-master.php'); ?>" class="button button-primary">
+                                Cerca Aggiornamenti su GitHub
+                            </a>
+                        </p>
                         <p class="description">
-                            Pulisce la cache delle repository su tutti i client e forza il ricaricamento.
-                            Utile quando i plugin non vengono rilevati come aggiornabili.
+                            Verifica immediatamente se esiste una nuova versione del plugin Marrison Master nel repository GitHub.
                         </p>
                     </td>
                 </tr>
             </table>
             
-            <div id="marrison-settings-notices"></div>
-            
-            <script>
-            jQuery(document).ready(function($) {
-                $('#marrison-force-refresh-repo').on('click', function(e) {
-                    e.preventDefault();
-                    
-                    if (!confirm('Questa operazione pulirà la cache delle repository su TUTTI i client connessi e forzerà il ricaricamento. Continuare?')) {
-                        return;
-                    }
-                    
-                    var btn = $(this);
-                    var originalText = btn.text();
-                    btn.prop('disabled', true).text('Operazione in corso...');
-                    
-                    $.post(ajaxurl, {
-                        action: 'marrison_force_refresh_repo',
-                        nonce: '<?php echo wp_create_nonce('marrison_master_nonce'); ?>'
-                    }, function(response) {
-                        if (response.success) {
-                            $('#marrison-settings-notices').html(
-                                '<div class="notice notice-success is-dismissible"><p>' + 
-                                response.data.message + 
-                                '</p></div>'
-                            );
-                        } else {
-                            $('#marrison-settings-notices').html(
-                                '<div class="notice notice-error is-dismissible"><p>' + 
-                                (response.data ? response.data.message : 'Errore sconosciuto') + 
-                                '</p></div>'
-                            );
-                        }
-                        btn.prop('disabled', false).text(originalText);
-                    }).fail(function() {
-                        $('#marrison-settings-notices').html(
-                            '<div class="notice notice-error is-dismissible"><p>Errore di rete</p></div>'
-                        );
-                        btn.prop('disabled', false).text(originalText);
-                    });
-                });
-            });
-            </script>
         </div>
         <?php
     }
@@ -152,42 +111,6 @@ class Marrison_Master_Admin {
             'message' => 'Cache Master pulita e dati resettati. Avvia una Sync Massiva per ricaricare tutto.',
             'html' => $html
         ]);
-    }
-
-    /**
-     * Handle force refresh repository cache on all clients
-     */
-    public function handle_force_refresh_repo() {
-        check_ajax_referer('marrison_master_nonce', 'nonce');
-        
-        $clients = $this->core->get_clients();
-        $success_count = 0;
-        $error_count = 0;
-        
-        foreach ($clients as $url => $data) {
-            $response = wp_remote_post($url . '/wp-json/marrison-agent/v1/clear-repo-cache', [
-                'timeout' => 15,
-                'sslverify' => false
-            ]);
-            
-            if (!is_wp_error($response) && wp_remote_retrieve_response_code($response) === 200) {
-                $success_count++;
-            } else {
-                $error_count++;
-            }
-        }
-        
-        // Clear master cache too
-        delete_site_transient('update_plugins');
-        delete_site_transient('update_themes');
-        
-        $message = sprintf(
-            'Cache repository aggiornata. Successo: %d, Errori: %d. Ora esegui una Sync Massiva per aggiornare i dati.',
-            $success_count,
-            $error_count
-        );
-        
-        wp_send_json_success(['message' => $message]);
     }
 
     public function handle_ajax_action() {
@@ -369,11 +292,12 @@ class Marrison_Master_Admin {
                                                     <strong style="display:block;"><?php echo esc_html($b['slug']); ?></strong>
                                                     <small style="opacity: 0.7;"><?php echo esc_html($b['type']); ?> - <?php echo esc_html($b['date']); ?></small>
                                                 </div>
-                                                <form style="display:inline;" onsubmit="return false;">
-                                                    <input type="hidden" name="client_url" value="<?php echo esc_attr($url); ?>">
-                                                    <input type="hidden" name="backup_file" value="<?php echo esc_attr($b['filename']); ?>">
-                                                    <button type="button" value="restore" class="button button-small marrison-action-btn" onclick="if(confirm('Ripristinare questo backup?')) performClientAction($(this));" style="background: #fff; color: #2271b1; border: none;">Ripristina</button>
-                                                </form>
+                                                <div style="display:inline;">
+                                                    <button type="button" value="restore" class="button button-small marrison-action-btn" 
+                                                            data-client-url="<?php echo esc_attr($url); ?>" 
+                                                            data-backup-file="<?php echo esc_attr($b['filename']); ?>" 
+                                                            style="background: #fff; color: #2271b1; border: none;">Ripristina</button>
+                                                </div>
                                             </li>
                                         <?php endforeach; ?>
                                     </ul>
@@ -578,6 +502,9 @@ class Marrison_Master_Admin {
                 <div class="actions">
                     <button id="marrison-bulk-sync" class="button button-primary">Sync Massiva</button>
                     <button id="marrison-clear-cache" class="button button-secondary">Pulisci Cache Master</button>
+                    <a href="<?php echo wp_nonce_url(admin_url('plugins.php?force-check=1&plugin=marrison-master/marrison-master.php'), 'marrison-force-check-marrison-master/marrison-master.php'); ?>" class="button button-secondary">
+                        Cerca Aggiornamenti Master
+                    </a>
                 </div>
                 <div id="marrison-progress-wrap" style="display:none; flex: 1; max-width: 400px; border: 1px solid #c3c4c7; height: 24px; background: #fff; position: relative; border-radius: 4px; overflow: hidden;">
                      <div id="marrison-progress-bar" style="width: 0%; height: 100%; background: #2271b1; transition: width 0.3s ease;"></div>
@@ -609,49 +536,92 @@ class Marrison_Master_Admin {
             nonce: '<?php echo wp_create_nonce('marrison_master_nonce'); ?>' 
         };
         
-        jQuery(document).ready(function($) {
-            
-            // --- Helper: Update Progress ---
-            function updateProgress(current, total, message) {
-                var percent = 0;
-                if (total > 0) percent = Math.round((current / total) * 100);
-                
-                $('#marrison-progress-wrap').show();
-                $('#marrison-progress-bar').css('width', percent + '%');
-                $('#marrison-progress-text').text(percent + '%');
-                if (message) $('#marrison-bulk-status').text(message);
-                
-                if (percent >= 100) {
-                    setTimeout(function() {
-                        $('#marrison-progress-wrap').fadeOut();
-                        $('#marrison-bulk-status').text('');
-                        $('#marrison-progress-bar').css('width', '0%');
-                    }, 2000);
-                }
-            }
+            function updateProgress(current, total, message, callback) {
+                var $ = jQuery;
+                var wrap = $('#marrison-progress-wrap');
+                var bar = $('#marrison-progress-bar');
+                var text = $('#marrison-progress-text');
+                var status = $('#marrison-bulk-status');
 
-            // --- Helper: Perform Single Action ---
-            function performClientAction(btn) {
-                var form = btn.closest('form');
-                var clientUrl = form.find('input[name="client_url"]').val();
-                var cmd = btn.val();
-                var backupFile = form.find('input[name="backup_file"]').val() || '';
-
-                if (cmd === 'delete' && !confirm('Sei sicuro di voler cancellare questo client?')) {
+                if (wrap.length === 0 || bar.length === 0 || text.length === 0 || status.length === 0) {
+                    console.error('Progress bar elements not found');
                     return;
                 }
 
-                // Disable all buttons in the row
+                if (total <= 0) {
+                    wrap.hide();
+                    bar.css('width', '0%');
+                    text.text('0%');
+                    status.text('');
+                    return;
+                }
+
+                if (current > total) current = total;
+                if (current < 0) current = 0;
+
+                var percent = Math.round((current / total) * 100);
+                
+                wrap.show();
+                bar.css('width', percent + '%');
+                text.text(percent + '%');
+                if (message) status.text(message);
+                
+                if (percent >= 100) {
+                    setTimeout(function() {
+                        wrap.fadeOut(400, function() {
+                            if (callback && typeof callback === 'function') {
+                                callback();
+                            }
+                            status.text('');
+                            bar.css('width', '0%');
+                            text.text('0%');
+                        });
+                    }, 3000);
+                }
+            }
+            window.marrisonUpdateProgress = updateProgress;
+
+            function performClientAction(btn) {
+                var $ = jQuery;
+                btn = $(btn);
+                var clientUrl = btn.data('client-url') || btn.closest('form').find('input[name="client_url"]').val();
+                var cmd = btn.val();
+                var backupFile = btn.data('backup-file') || btn.closest('form').find('input[name="backup_file"]').val() || '';
+
+                if (cmd === 'delete' && !confirm('Sei sicuro di voler cancellare questo client?')) {
+            return;
+        }
+        if (cmd === 'restore' && !confirm('Ripristinare questo backup?')) {
+            return;
+        }
+
+        console.log('performClientAction called:', cmd, 'for client:', clientUrl); // Debug log
+
                 var row = btn.closest('tr');
                 var actionButtons = row.find('.marrison-action-btn');
+                var allActionButtons = $('.marrison-action-btn');
                 actionButtons.prop('disabled', true);
+                allActionButtons.prop('disabled', true);
                 
                 var originalButtonText = btn.text();
+                var clientName = 'Client'; 
+
+                try {
+                    if (row.hasClass('mmu-main-row')) {
+                        clientName = row.find('td:nth-child(2)').text();
+                    } else {
+                        var mainRow = row.closest('.mmu-details-row').prev('.mmu-main-row');
+                        if (mainRow.length) {
+                            clientName = mainRow.find('td:nth-child(2)').text();
+                        }
+                    }
+                } catch(e) { console.error('Name extraction failed', e); }
+
+                var progressIntervalId = null;
+                var progressMessage = cmd + ' su ' + clientName + ': In corso...';
                 if(cmd === 'sync' || cmd === 'update' || cmd === 'restore') {
                     btn.text('In corso...');
-                    var mainRow = row.hasClass('mmu-main-row') ? row : row.prev();
-                    var clientName = mainRow.find('td:nth-child(2)').text();
-                    updateProgress(0, 1, 'Avvio ' + cmd + ' su ' + clientName);
+                    window.marrisonUpdateProgress(10, 100, progressMessage);
                 }
 
                 $.post(ajaxurl, {
@@ -660,61 +630,85 @@ class Marrison_Master_Admin {
                     client_url: clientUrl,
                     cmd: cmd,
                     backup_file: backupFile
-                }, function(response) {
-                    if (response.success) {
-                        // Update progress bar to complete
-                        if(cmd === 'sync' || cmd === 'update' || cmd === 'restore') {
-                            var actionLabel = cmd === 'sync' ? 'Sincronizzazione' : 
-                                             cmd === 'update' ? 'Aggiornamento' : 
-                                             cmd === 'restore' ? 'Ripristino backup' : 'Operazione';
-                            updateProgress(1, 1, actionLabel + ' completata!');
+                }).done(function(response) {
+                    try {
+                        if (response && response.success && response.data && response.data.html) {
+                            $('#marrison-clients-body').html(response.data.html);
                         }
-                        
-                        $('#marrison-clients-body').html(response.data.html);
-                        $('#marrison-notices').html('<div class="notice notice-success is-dismissible"><p>' + response.data.message + '</p></div>');
-                        
-                        var isRestore = cmd === 'restore';
-                        if (isRestore) {
-                            $('#marrison-notices').append('<div class="notice notice-info is-dismissible"><p>Ripristino completato. Avvio sync automatico...</p></div>');
-                            
-                            // Find the sync button for the client in the new HTML
-                            var newSyncBtn = $('#marrison-clients-body')
-                                .find('.mmu-main-row input[name="client_url"][value="' + clientUrl.replace(/"/g, '\\"') + '"]')
-                                .closest('form')
-                                .find('.marrison-action-btn[value="sync"]');
-
-                            if (newSyncBtn.length) {
-                                setTimeout(function() {
-                                    // The events will be bound by the bindEvents() call below.
-                                    // We just need to call the action on the button element.
-                                    performClientAction(newSyncBtn);
-                                }, 200);
-                            }
+                        if (response && response.success && response.data && response.data.message) {
+                            $('#marrison-notices').html('<div class="notice notice-success is-dismissible"><p>' + response.data.message + '</p></div>');
+                        } else if (response && !response.success) {
+                            $('#marrison-notices').html('<div class="notice notice-error is-dismissible"><p>' + (response.data ? response.data.message : 'Errore') + '</p></div>');
                         }
-                    } else {
-                        // Update progress bar to show error
-                        if(cmd === 'sync' || cmd === 'update' || cmd === 'restore') {
-                            var actionLabel = cmd === 'sync' ? 'sincronizzazione' : 
-                                             cmd === 'update' ? 'aggiornamento' : 
-                                             cmd === 'restore' ? 'ripristino backup' : 'operazione';
-                            updateProgress(0, 1, 'Errore durante ' + actionLabel);
-                        }
-                        $('#marrison-notices').html('<div class="notice notice-error is-dismissible"><p>' + (response.data ? response.data.message : 'Errore') + '</p></div>');
+                    } catch (e) {
+                        console.error('UI update failed', e);
+                    } finally {
+                        try { bindEvents(); } catch (e) {}
                     }
-                    bindEvents(); // Re-bind events to new content
                 }).fail(function() {
-                    // Update progress bar to show network error
-                    if(cmd === 'sync' || cmd === 'update' || cmd === 'restore') {
-                        updateProgress(0, 1, 'Errore di rete');
-                    }
                     $('#marrison-notices').html('<div class="notice notice-error is-dismissible"><p>Errore di rete.</p></div>');
-                }).always(function() {
-                    // Re-enable buttons is handled by bindEvents and re-rendering
+                }).always(function(data, textStatus, errorThrown) {
+                    if (progressIntervalId) {
+                        try { clearInterval(progressIntervalId); } catch(e) {}
+                        progressIntervalId = null;
+                    }
+
+                    if (cmd === 'sync' || cmd === 'update' || cmd === 'restore') {
+                        var isSuccess = (textStatus === 'success');
+                        if (isSuccess && data && typeof data === 'object' && data.success === false) isSuccess = false;
+
+                        var statusMsg = isSuccess ? 'Completato' : 'Fallito';
+                        
+                        var onCompletionCallback = null;
+                        if (cmd === 'restore' && isSuccess) {
+                            onCompletionCallback = function() {
+                                try {
+                                    $('#marrison-notices').append('<div class="notice notice-info is-dismissible"><p>Ripristino completato. Avvio sync automatico...</p></div>');
+                                    
+                                    var newSyncBtn = $('.mmu-main-row input[name="client_url"][value="' + clientUrl.replace(/"/g, '\\"') + '"]')
+                                        .closest('form')
+                                        .find('.marrison-action-btn[value="sync"]');
+
+                                    if (newSyncBtn.length) {
+                                        performClientAction(newSyncBtn);
+                                    } else {
+                                        console.log('Sync button not found after restore');
+                                    }
+                                } catch(e) { 
+                                    console.error('Auto-sync error:', e); 
+                                }
+                            };
+                        }
+                        
+                        window.marrisonUpdateProgress(100, 100, cmd + ' su ' + clientName + ': ' + statusMsg, onCompletionCallback);
+
+                    } else {
+                        window.marrisonUpdateProgress(0, 0);
+                    }
+
+                    try {
+                        if (window.marrisonProgressInterval) {
+                            clearInterval(window.marrisonProgressInterval);
+                            window.marrisonProgressInterval = null;
+                        }
+                    } catch(e) { console.error('Progress interval clear failed', e); }
+
+                    try {
+                        if (actionButtons && actionButtons.length) actionButtons.prop('disabled', false);
+                    } catch(e) { console.error('Button enable failed', e); }
+                    try {
+                        if (!window.isBulkRunning && allActionButtons && allActionButtons.length) allActionButtons.prop('disabled', false);
+                    } catch(e) { console.error('Button enable failed', e); }
+
+                    try {
+                        if (btn && btn.length) btn.text(originalButtonText);
+                    } catch(e) { console.error('Button text reset failed', e); }
                 });
             }
+            window.performClientAction = performClientAction;
 
             function bindEvents() {
-                // Remove existing handlers
+                var $ = jQuery;
                 $('.mmu-main-row').off('click').on('click', function(e) {
                     if ($(e.target).closest('a, button, input').length) return;
                     if ($(e.target).closest('td').is(':last-child')) return;
@@ -724,124 +718,114 @@ class Marrison_Master_Admin {
                 
                 $('.marrison-action-btn').off('click').on('click', function(e) {
                     e.preventDefault();
-                    if (window.isBulkRunning) return; // Prevent clicks during bulk
-                    performClientAction($(this));
+                    console.log('Button clicked:', $(this).val(), 'isBulkRunning:', window.isBulkRunning); // Debug log
+                    if (window.isBulkRunning) return; 
+                    performClientAction(this);
                 });
             }
-            
-            // --- Bulk Sync Logic ---
-            $('#marrison-bulk-sync').on('click', function(e) {
-                e.preventDefault();
-                  if (window.isBulkRunning) return;
- 
-                  var clients = [];
-                  $('#marrison-clients-body .marrison-action-btn[value="sync"]').each(function() {
-                      var clientUrl = $(this).closest('form').find('input[name="client_url"]').val();
-                      if (clientUrl && clients.indexOf(clientUrl) === -1) {
-                          clients.push(clientUrl);
-                      }
-                  });
- 
-                  if (clients.length === 0) {
-                     alert('Nessun client disponibile per la sync.');
-                      return;
-                  }
- 
-                 if (!confirm('Avviare la sync su tutti i ' + clients.length + ' client? L\'operazione potrebbe richiedere tempo.')) return;
 
-                window.isBulkRunning = true;
-                var bulkSyncBtn = $(this);
-                var originalText = bulkSyncBtn.text();
-                bulkSyncBtn.prop('disabled', true);
-                $('.marrison-action-btn').prop('disabled', true);
-                $('#marrison-notices').empty();
+            jQuery(function($) {
+                bindEvents();
+                
+                $('#marrison-bulk-sync').on('click', function(e) {
+                    e.preventDefault();
+                    if (window.isBulkRunning) return;
 
-                var total = clients.length;
-                var current = 0;
-                var successCount = 0;
-                var errorCount = 0;
-                
-                updateProgress(0, total, 'Avvio Sync massiva...');
-                
-                function syncNext() {
-                    if (current >= total) {
-                        // All syncs are done, now refresh the table with a noop action
-                        $.post(ajaxurl, {
-                            action: 'marrison_client_action',
-                            cmd: 'noop',
-                            nonce: marrison_vars.nonce
-                        }, function(response) {
-                            if (response.success && response.data.html) {
-                                $('#marrison-clients-body').html(response.data.html);
-                                bindEvents();
-                            }
-                            $('#marrison-notices').html('<div class="notice notice-success is-dismissible"><p>Sync massiva completata. Successi: ' + successCount + ', Errori: ' + errorCount + '</p></div>');
-                            updateProgress(total, total, 'Completato!');
-                        }).fail(function() {
-                             $('#marrison-notices').html('<div class="notice notice-error is-dismissible"><p>Errore durante l\'aggiornamento finale della tabella.</p></div>');
-                        }).always(function() {
-                            window.isBulkRunning = false;
-                            bulkSyncBtn.prop('disabled', false).text(originalText);
-                        });
+                    var clients = [];
+                    $('#marrison-clients-body .marrison-action-btn[value="sync"]').each(function() {
+                        var clientUrl = $(this).closest('form').find('input[name="client_url"]').val();
+                        if (clientUrl && clients.indexOf(clientUrl) === -1) {
+                            clients.push(clientUrl);
+                        }
+                    });
+
+                    if (clients.length === 0) {
+                        alert('Nessun client disponibile per la sync.');
                         return;
                     }
 
-                    var clientUrl = clients[current];
-                    updateProgress(current, total, 'Sync in corso: ' + (current + 1) + '/' + total);
+                    if (!confirm('Avviare la sync su tutti i ' + clients.length + ' client?')) return;
+
+                    window.isBulkRunning = true;
+                    var bulkSyncBtn = $(this);
+                    var originalText = bulkSyncBtn.text();
+                    bulkSyncBtn.prop('disabled', true);
+                    $('.marrison-action-btn').prop('disabled', true);
+                    $('#marrison-notices').empty();
+
+                    var total = clients.length;
+                    var current = 0;
+                    var successCount = 0;
+                    var errorCount = 0;
+                    
+                    updateProgress(0, total, 'Avvio Sync massiva...');
+                    
+                    function syncNext() {
+                        if (current >= total) {
+                            $.post(ajaxurl, {
+                                action: 'marrison_client_action',
+                                cmd: 'noop',
+                                nonce: marrison_vars.nonce
+                            }, function(response) {
+                                if (response.success && response.data.html) {
+                                    $('#marrison-clients-body').html(response.data.html);
+                                    bindEvents();
+                                }
+                                $('#marrison-notices').html('<div class="notice notice-success is-dismissible"><p>Sync massiva completata. Successi: ' + successCount + ', Errori: ' + errorCount + '</p></div>');
+                                updateProgress(total, total, 'Completato!');
+                            }).always(function() {
+                                window.isBulkRunning = false;
+                                bulkSyncBtn.prop('disabled', false).text(originalText);
+                            });
+                            return;
+                        }
+
+                        var clientUrl = clients[current];
+                        updateProgress(current, total, 'Sync in corso: ' + (current + 1) + '/' + total);
+                        
+                        $.post(ajaxurl, {
+                            action: 'marrison_client_action',
+                            cmd: 'sync',
+                            client_url: clientUrl,
+                            bulk_mode: 'true',
+                            nonce: marrison_vars.nonce
+                        }, function(response) {
+                            if (response.success) successCount++;
+                            else errorCount++;
+                        }).fail(function() {
+                            errorCount++;
+                        }).always(function() {
+                            current++;
+                            syncNext();
+                        });
+                    }
+                    
+                    syncNext();
+                });
+                
+                $('#marrison-clear-cache').on('click', function(e) {
+                    e.preventDefault();
+                    var btn = $(this);
+                    btn.prop('disabled', true).text('Pulizia...');
                     
                     $.post(ajaxurl, {
-                        action: 'marrison_client_action',
-                        cmd: 'sync',
-                        client_url: clientUrl,
-                        bulk_mode: 'true',
+                        action: 'marrison_master_clear_cache',
                         nonce: marrison_vars.nonce
                     }, function(response) {
                         if (response.success) {
-                            successCount++;
+                            $('#marrison-notices').html('<div class="notice notice-success is-dismissible"><p>' + response.data.message + '</p></div>');
+                            if (response.data.html) {
+                                $('#marrison-clients-body').html(response.data.html);
+                                bindEvents();
+                            }
                         } else {
-                            errorCount++;
+                            $('#marrison-notices').html('<div class="notice notice-error is-dismissible"><p>Errore pulizia cache</p></div>');
                         }
-                    }).fail(function() {
-                        errorCount++;
                     }).always(function() {
-                        current++;
-                        syncNext();
+                        btn.prop('disabled', false).text('Pulisci Cache Master');
                     });
-                }
-                
-                syncNext(0);
-            });
-            
-            // Bulk update removed as per request
-            
-            // --- Clear Cache Logic ---
-            $('#marrison-clear-cache').on('click', function(e) {
-                e.preventDefault();
-                var btn = $(this);
-                btn.prop('disabled', true).text('Pulizia...');
-                
-                $.post(ajaxurl, {
-                    action: 'marrison_master_clear_cache',
-                    nonce: marrison_vars.nonce
-                }, function(response) {
-                    if (response.success) {
-                        $('#marrison-notices').html('<div class="notice notice-success is-dismissible"><p>' + response.data.message + '</p></div>');
-                        if (response.data.html) {
-                            $('#marrison-clients-body').html(response.data.html);
-                            bindEvents();
-                        }
-                    } else {
-                        $('#marrison-notices').html('<div class="notice notice-error is-dismissible"><p>Errore pulizia cache</p></div>');
-                    }
-                    btn.prop('disabled', false).text('Pulisci Cache Master');
-                }).fail(function() {
-                    $('#marrison-notices').html('<div class="notice notice-error is-dismissible"><p>Errore di rete</p></div>');
-                    btn.prop('disabled', false).text('Pulisci Cache Master');
                 });
             });
-            
-            bindEvents();
-        });
         </script>
         <?php
     }

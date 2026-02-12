@@ -3,7 +3,7 @@
  * Plugin Name: Marrison Master
  * Plugin URI: https://github.com/marrisonlab/marrison-master
  * Description: Master controller for Marrison Update System.
- * Version: 1.0.1
+ * Version: 1.0.2
  * Author: Angelo Marra
  * Author URI: https://marrisonlab.com
  * License: GPL v2 or later
@@ -21,6 +21,7 @@ define('MARRISON_MASTER_URL', plugin_dir_url(__FILE__));
 require_once MARRISON_MASTER_PATH . 'includes/core.php';
 require_once MARRISON_MASTER_PATH . 'includes/admin.php';
 require_once MARRISON_MASTER_PATH . 'includes/api.php';
+require_once MARRISON_MASTER_PATH . 'includes/github-updater.php';
 
 // Initialize
 function marrison_master_init() {
