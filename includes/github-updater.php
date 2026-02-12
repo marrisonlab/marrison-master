@@ -22,6 +22,22 @@ class Marrison_GitHub_Updater {
         add_filter('plugins_api', [$this, 'get_plugin_info'], 10, 3);
         add_action('admin_init', [$this, 'force_check']);
         add_filter('plugin_action_links_' . $this->plugin_slug, [$this, 'add_force_check_button'], 10, 2);
+        add_action('admin_notices', [$this, 'display_check_result']);
+    }
+    
+    public function display_check_result() {
+        if (isset($_GET['marrison-check-result'])) {
+            $status = sanitize_text_field($_GET['marrison-check-result']);
+            $message = get_transient('marrison_check_message_' . get_current_user_id());
+            
+            if ($status === 'success') {
+                echo '<div class="notice notice-success is-dismissible"><p>' . esc_html($message) . '</p></div>';
+            } else {
+                echo '<div class="notice notice-error is-dismissible"><p>' . esc_html($message) . '</p></div>';
+            }
+            
+            delete_transient('marrison_check_message_' . get_current_user_id());
+        }
     }
     
     public function check_for_updates($transient) {
@@ -89,7 +105,7 @@ class Marrison_GitHub_Updater {
         $url = "https://api.github.com/repos/{$this->github_user}/{$this->github_repo}/releases/latest";
         $response = $this->github_request($url);
         
-        if ($response) {
+        if ($response && !is_wp_error($response)) {
             set_transient($this->cache_key, $response, $this->cache_duration);
             return $response;
         }
@@ -130,12 +146,12 @@ class Marrison_GitHub_Updater {
         $response = wp_remote_get($url, $args);
         
         if (is_wp_error($response)) {
-            return null;
+            return $response; // Return WP_Error object
         }
         
         $response_code = wp_remote_retrieve_response_code($response);
         if ($response_code !== 200) {
-            return null;
+            return new WP_Error('github_api_error', 'GitHub API Error: ' . $response_code . ' ' . wp_remote_retrieve_response_message($response));
         }
         
         $body = wp_remote_retrieve_body($response);
@@ -149,9 +165,27 @@ class Marrison_GitHub_Updater {
             check_admin_referer('marrison-force-check-' . $this->plugin_slug);
             
             delete_transient($this->cache_key);
-            wp_clean_plugins_cache();
+            delete_site_transient('update_plugins'); // Force WP to refresh list
             
-            wp_redirect(admin_url('plugins.php?marrison-check=1'));
+            // Perform direct check
+            $url = "https://api.github.com/repos/{$this->github_user}/{$this->github_repo}/releases/latest";
+            $response = $this->github_request($url);
+            
+            if (is_wp_error($response)) {
+                set_transient('marrison_check_message_' . get_current_user_id(), 'Errore durante il controllo: ' . $response->get_error_message(), 60);
+                wp_redirect(admin_url('plugins.php?marrison-check-result=error'));
+            } else {
+                $remote_ver = ltrim($response->tag_name, 'v');
+                $plugin_data = get_plugin_data($this->plugin_file);
+                $current_ver = $plugin_data['Version'];
+                
+                if (version_compare($current_ver, $remote_ver, '<')) {
+                    set_transient('marrison_check_message_' . get_current_user_id(), "Trovata nuova versione: {$remote_ver} (Attuale: {$current_ver}). Aggiorna ora!", 60);
+                } else {
+                    set_transient('marrison_check_message_' . get_current_user_id(), "Nessun aggiornamento trovato. Ultima versione online: {$remote_ver} (Installata: {$current_ver})", 60);
+                }
+                wp_redirect(admin_url('plugins.php?marrison-check-result=success'));
+            }
             exit;
         }
     }
@@ -176,7 +210,7 @@ class Marrison_GitHub_Updater {
 }
 
 // Initialize GitHub updater for Marrison Master
-add_action('admin_init', function() {
+add_action('plugins_loaded', function() {
     if (file_exists(plugin_dir_path(__FILE__) . '../marrison-master.php')) {
         new Marrison_GitHub_Updater(
             plugin_dir_path(__FILE__) . '../marrison-master.php',

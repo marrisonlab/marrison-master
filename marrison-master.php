@@ -3,7 +3,7 @@
  * Plugin Name: Marrison Master
  * Plugin URI: https://github.com/marrisonlab/marrison-master
  * Description: Master controller for Marrison Update System.
- * Version: 1.0.3
+ * Version: 1.0.6
  * Author: Angelo Marra
  * Author URI: https://marrisonlab.com
  * License: GPL v2 or later
